@@ -1,19 +1,19 @@
 import pathlib
 from multiprocessing import Pool, cpu_count
 from functools import partial
+from typing import List
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import json
-
-# from fake_useragent import UserAgent
 import time
 import os
 
+
 my_user_agent = 'user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36'
-# useragent = UserAgent()
 options = webdriver.ChromeOptions()
 options.add_argument(f'useragent={my_user_agent}')
 options.add_argument('--disable-blink-features=AutomationControlled')
@@ -21,18 +21,17 @@ options.add_argument('--disable-blink-features=AutomationControlled')
 
 def get_list_links(category_url: str):
     """
-    get a list of links to products of the required quantity
-    :param quantity:
-    :param category_url:
-    :param file_name:
-    :return: list
+    Получает список ссылок на товары с первой страницы каталога
+    :param category_url: str - ссылка на категорию товаров. Получаем прямым копированием с адресной строки выбранной
+    категории
+    :return: list - список ссылок на товары с первой страницы открытой категории.
     """
     page = 1
     list_of_links = []
 
     browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     browser.get(url=f'{category_url}&p={page}')
-    time.sleep(5)
+    time.sleep(2)
     link_cards_tag = browser.find_element(by=By.CLASS_NAME, value="products-page__list")
     link_cards_block = link_cards_tag.find_elements(by=By.CLASS_NAME, value='catalog-product__name')
     list_href = []
@@ -43,7 +42,15 @@ def get_list_links(category_url: str):
     return list_of_links
 
 
-def multiprocess_map(category_url, quantity_page):
+def multiprocess_get_list_links(category_url: str, quantity_page: int) -> List[str]:
+    """
+    Функция принимает ссылку на категорию товаров и количество страниц, с которых необходимо парсить информацию.
+    Функция работает в мушьтипроцессоном режиме и запускает функцию get_list_links
+    Возвращает список со ссылками на каждый товар в отдельности.
+    :param category_url: str - Ссылка на категорию товаров
+    :param quantity_page: int - Количество страниц товара для парсинга
+    :return: list - Список ссылок на товары.
+    """
     list_of_pages = [f'{category_url}&p={page}' for page in range(1, quantity_page + 1)]
     with Pool(processes=cpu_count()) as pool:
         links = pool.map(get_list_links, list_of_pages)
@@ -52,28 +59,32 @@ def multiprocess_map(category_url, quantity_page):
     return result
 
 
-def get_list_link_for_product(file_name):
-    with open(file_name, 'r') as file:
-        list_link_for_product = file.readlines()
-    return list_link_for_product
-
-
 def get_product(category_name: str, args: tuple) -> dict:
+    """
+    Функция собирает данные о конкретном продукте.
+    :param category_name: str - категория товара, который в данный момент обрабатывается
+    :param args: tuple - кортеж из двух элементов (ссылка на продукт, порядковый номер продукта). Порядковый номер
+    продукта будет записан в имени файла его изображения с добавлением .png
+    :return: dict - словарь с названием характеристики и его значением
+    """
+    if not os.path.exists(category_name):
+        os.mkdir(category_name)
     product = {}
     browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     browser.get(url=args[0])
     browser.maximize_window()
-    time.sleep(5)
+    time.sleep(1)
     image = browser.find_element(by=By.CLASS_NAME, value='product-images-slider__img')
     image.click()
     time.sleep(5)
     image = browser.find_element(by=By.CLASS_NAME, value='media-viewer-image__main-img')
+    image_screen = image.screenshot_as_png
     with open(f'{category_name}/{args[1]}.png', 'bw') as file:
-        image_screen = image.screenshot_as_png
         file.write(image_screen)
-        product['image'] = f'{args[1]}.png'
-        button_close = browser.find_element(by=By.CLASS_NAME, value='media-viewer__close')
-        button_close.click()
+    product['image'] = f'{args[1]}.png'
+    time.sleep(2)
+    button_close = browser.find_element(by=By.CLASS_NAME, value='media-viewer__close')
+    button_close.click()
     time.sleep(5)
     name = browser.find_element(by=By.TAG_NAME, value='h1').text
     product['name'] = name
@@ -103,10 +114,20 @@ def get_product(category_name: str, args: tuple) -> dict:
 
 
 def multiprocess_get_product(list_links, category_name):
+    """
+    Функция принимает список ссылок на товары и название категории товара. Работает в мультипроцессорном режиме,
+    использует функцию get_product. Название категории используется для создания директории, куда записываются файлы
+    с изображением товара. Пути к файлам
+    :param list_links: list - список ссылок на товар
+    :param category_name: str - название категории.
+    :return:
+    """
     args = [(link, num + 1, category_name) for num, link in enumerate(list_links)]
     func = partial(get_product, category_name)
     with Pool(processes=cpu_count()) as pool:
         product_list = pool.map(func, args)
+    with open(f'{category_name}.json', 'w') as file:
+        json.dump(product_list, file, indent=4)
     return product_list
 
 
@@ -116,8 +137,8 @@ def product_to_json(item):
 
 
 if __name__ == '__main__':
-
-    result = multiprocess_map('https://www.dns-shop.ru/catalog/17a89aab16404e77/videokarty/?order=2&p=2', 2)
+    result = multiprocess_get_list_links('https://www.dns-shop.ru/catalog/17a89aab16404e77/videokarty/?order=2&p=2', 1)
     print(*result, sep='\n')
     list_product = multiprocess_get_product(result, 'videocard')
     print(*list_product, sep='\n')
+
