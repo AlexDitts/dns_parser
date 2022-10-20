@@ -67,8 +67,7 @@ def get_product(category_name: str, args: tuple) -> dict:
     продукта будет записан в имени файла его изображения с добавлением .png
     :return: dict - словарь с названием характеристики и его значением
     """
-    if not os.path.exists(category_name):
-        os.mkdir(category_name)
+
     product = {}
     browser = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     browser.get(url=args[0])
@@ -122,9 +121,11 @@ def multiprocess_get_product(list_links, category_name):
     :param category_name: str - название категории.
     :return:
     """
+    if not os.path.exists(category_name):
+        os.mkdir(category_name)
     args = [(link, num + 1, category_name) for num, link in enumerate(list_links)]
     func = partial(get_product, category_name)
-    with Pool(processes=cpu_count()) as pool:
+    with Pool(processes=cpu_count()-1) as pool:
         product_list = pool.map(func, args)
     with open(f'{category_name}.json', 'w') as file:
         json.dump(product_list, file, indent=4)
@@ -137,8 +138,8 @@ def product_to_json(item):
 
 
 if __name__ == '__main__':
-    result = multiprocess_get_list_links('https://www.dns-shop.ru/catalog/17a89aab16404e77/videokarty/?order=2&p=2', 1)
+    result = multiprocess_get_list_links('https://www.dns-shop.ru/catalog/17a8face16404e77/roboty-pylesosy/?order=2', 1)
     print(*result, sep='\n')
-    list_product = multiprocess_get_product(result, 'videocard')
+    list_product = multiprocess_get_product(result, 'robot_vacuum_cleaner')
     print(*list_product, sep='\n')
 
